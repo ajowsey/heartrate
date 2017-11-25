@@ -1,0 +1,241 @@
+/*************************************************************************
+ * University of Alberta
+ * Blood Oxygen Saturation, Heart Rate, Temperature, and IMU Sampling Hub
+ *************************************************************************
+ * Compiler: IAR C Compiler for 8051
+ * Target platform: CC2540/1
+ *************************************************************************
+ * Revision 1.0.0.0 2017/07/20
+ * Acknowledgements: Andrew Tiberius Jowsey
+ *************************************************************************/
+
+/*********************************************************************
+ * INCLUDES
+ */
+#include "sampleTestData.h"
+#include "simpleBLEPeripheral.h"
+#include "pulse_sampling.h"
+#include "sampleTestData.h"
+#include "pulse_AFE.h"
+#include "OnBoard.h"
+#include "hal_types.h"
+#include "internalFlash.h"
+
+/*********************************************************************
+ * CONSTANTS
+ */
+
+#define OFFLINE_PROCESSING			TRUE
+
+#define SAMPLE_BUFFER_LENGTH_SEC	        4
+#define SAMPLE_FREQEUNCY_HZ			500
+#define SAMPLE_BYTE_LNGTH			4
+#define SAMPLE_BUFFER_SMP_LGNTH 		SAMPLE_BUFFER_LENGTH_SEC * SAMPLE_FREQEUNCY_HZ
+
+/*********************************************************************
+ * VARIABLES
+ */
+   
+static uint16 pulseSamplingCount = 0;
+
+static void pulseSamplingHeartRate();
+static void pulseSamplingSpO2();
+static bool pulseSamplingMovingAv256( uint32* );
+
+/*********************************************************************
+ * @fn      pulseSamplingInit
+ *
+ * @brief   Initialize...ever heard of it?
+ *
+ * @param   none
+ *
+ * @return  none
+ */
+void pulseSamplingInit()
+{
+  // AFE Init
+  AFEInit();
+  
+  //pulseSamplingSaveTestData();
+ 
+  // Temperature Init
+  
+  // MPU Init
+}
+
+/*********************************************************************
+ * @fn      pulseSamplingLongTerm
+ *
+ * @brief   This function is called by the long term event every 5 minutes
+ *			or so. This function will be used intiate a 500 Hz interrupt-driven
+ 			sampling routine with the AFE4490. At the begining of every cycle,
+ 			the sample buffer must be reset.
+ *
+ * @param   none
+ *
+ * @return  none
+ */
+void pulseSamplingLongTerm()
+{
+  // Reset buffer location
+  intFlash_LEDStartNewLog();
+    
+  // Turn on LED Sampling
+  AFEStartSampling();
+}
+
+/*********************************************************************
+ * @fn      pulseSamplingSaveTestData
+ *
+ * @brief   Fill the internal flash with test data   
+ *
+ * @param   none
+ *
+ * @return  none
+ */
+void pulseSamplingSaveTestData()
+{
+  uint32 testReadRed;
+  uint32 testReadIR;
+
+  // Write Sample Data into Internal Flash
+  for (uint16 n = 0; n<(sizeof(redTestSamples)/4); n++)
+  {
+    intFlash_WriteLEDSample((uint32)redTestSamples[n],(uint32)irTestSamples[n],n);
+    intFlash_ReadLEDSample( &testReadRed, &testReadIR, n );
+  }
+
+  // 1999 is the last sample
+  intFlash_ReadLEDSample( &testReadRed, &testReadIR, 1999 );
+}
+
+/*********************************************************************
+ * @fn      pulseSamplingHeartRate
+ *
+ * @brief   When the sample buffer is full, this function will be
+ *			used to determine heart rate. Once a reasonable heart 
+ *			rate has been calculated, the latest value is stored
+ *			at internal flash and the corresponding GATT characteristic
+ *			is updated.
+ *
+ * @param	none
+ *
+ * @return  1 byte heart rate measurement to be added to total sample
+ */
+void pulseSamplingHeartRate()
+{
+  uint32 tempSavedRedSample;
+  uint32 tempSavedIRSample;
+  
+  // Cycle through saved samples
+  for(uint16 n = 0 ; n < SAMPLE_BUFFER_SMP_LGNTH-1; n++ )
+  {
+    // Retrieve next sample
+    intFlash_ReadLEDSample(&tempSavedRedSample,&tempSavedIRSample, n);
+  }
+
+  // Need to apply a finite filter to get an array of AC and DC signals
+
+  // Memory will literally triple in size and BLE stack uses part of it
+
+  // Need to find peaks of the ac signal
+
+  // Need to find average distance between peaks
+
+}
+
+/*********************************************************************
+ * @fn      pulseSamplingSpO2
+ *
+ * @brief   
+ *
+ * @param   none
+ *
+ * @return  1 byte heart rate measurement to be added to total sample
+ */
+void pulseSamplingSpO2()
+{
+// Need to apply a finite filter to get an array of AC and DC signals
+
+// Memory will literally triple in size and BLE stack uses part of it
+
+// Need to find peaks of the ac signal
+
+// Need to find average distance between peaks
+
+}
+
+/***********************************************************************************
+* @fn          pulseSamplingAFEIsr
+*
+* @brief       Port 0 Interrupt Service Routine, which executes when the AFE4490's
+*              ADC_RDY pin creates a rising edge on P0.5. We will read the sample
+*              and reset the interrupt.
+*
+* @param       void
+*
+* @return      void */
+
+void pulseSamplingAFEIsr()
+{
+  uint32 RedSample;
+  uint32 IRSample;
+
+ // Read a sample
+  AFEReadSample(&RedSample, &IRSample);
+  
+  /////////////////////////
+  //  Fake Measurements  //
+  RedSample = redTestSamples[pulseSamplingCount];
+  IRSample = irTestSamples[pulseSamplingCount];
+  /////////////////////////
+  
+  // Use this while  internal flash is commented
+  // pulseSamplingCount++;
+  
+  
+  // Save it into internal flash
+  intFlash_WriteLEDSample(RedSample, IRSample,pulseSamplingCount++);
+  
+  // When all samples are taken
+  if(pulseSamplingCount > (SAMPLE_BUFFER_SMP_LGNTH - 1) )
+  {
+    pulseSamplingCount = 0;
+    
+    // Turn off AFE and Interrupts
+    AFEStopSampling();
+    
+    // Start Postprocessing O2% and Heart Rate Sampling
+    pulseSamplingHeartRate();
+    // pulseSamplingSpO2();
+  }
+} 
+
+/***********************************************************************************
+* @fn           pulseSamplingMovingAv256
+*
+* @brief        Moving average with a 256 sample window
+*
+* @param        22 bit, uint32, rawData
+*
+* @return       22 bit, uint32, filteredData */
+
+bool pulseSamplingMovingAv256( uint32* rawDataRed, uint32* rawDataRed )
+{
+  static uint8 windowCount = 0;
+  static uint32 movingAverage = 0;
+  
+movingAverage += (*rawData)>>8;
+   
+if ( windowCount < 255 )
+  {
+    windowCount++;
+    return FALSE;
+  }
+  else
+  {
+    // Alter the rawData value
+    *rawData = movingAverage;
+    return TRUE;
+  }
+}

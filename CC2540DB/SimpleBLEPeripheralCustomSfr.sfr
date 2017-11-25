@@ -1,0 +1,6 @@
+[Sfr]
+sfr = "P1DIR",	"SFR",	0xfe,	1,	base=16,	modified
+
+
+[SfrGroupInfo]
+group = "Custom", "P1DIR"
